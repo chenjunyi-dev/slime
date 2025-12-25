@@ -8,6 +8,7 @@ from typing import Dict, Optional
 import ray
 import torch
 import torch.distributed as dist
+import mindspeed.megatron_adaptor
 from megatron.core import mpu
 from ray.actor import ActorHandle
 from torch_memory_saver import torch_memory_saver

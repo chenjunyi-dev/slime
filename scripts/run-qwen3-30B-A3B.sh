@@ -12,9 +12,18 @@ pkill -9 python
 pkill -9 redis
 
 set -ex
+ulimit -n 65535
 
 # will prevent ray from buffering stdout/stderr
 export PYTHONBUFFERED=16
+export PYTHONPATH="/home/slime-proj/Megatron-LM/:/home/slime-proj/sglang/python:$PYTHONPATH"
+export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+export CUDA_DEVICE_MAX_CONNECTIONS=1
+export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
+export HCCL_HOST_SOCKET_PORT_RANGE=60000-60050
+export HCCL_NPU_SOCKET_PORT_RANGE=61000-61050
+export HYDRA_FULL_ERROR=1
+export PYTORCH_NPU_ALLOC_CONF=expandable_segments:True
 
 NVLINK_COUNT=$(nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l)
 if [ "$NVLINK_COUNT" -gt 0 ]; then
@@ -28,16 +37,16 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 source "${SCRIPT_DIR}/models/qwen3-30B-A3B.sh"
 
 CKPT_ARGS=(
-   --hf-checkpoint /root/Qwen3-30B-A3B
+   --hf-checkpoint /home/data/Qwen3-30B-A3B
    #--hf-checkpoint /root/Qwen3-30B-A3B-FP8
-   --ref-load /root/Qwen3-30B-A3B_torch_dist
-   --load /root/Qwen3-30B-A3B_slime/
-   --save /root/Qwen3-30B-A3B_slime/
+   --ref-load /home/data/Qwen3-30B-A3B_torch_dist
+   --load /home/data/Qwen3-30B-A3B
+   --save /home/slime-proj/slime/Qwen3-30B-A3B_slime
    --save-interval 20
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data /root/dapo-math-17k/dapo-math-17k.jsonl
+   --prompt-data /home/slime-proj/dataset/dapo-math-17k/dapo-math-17k.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -55,7 +64,7 @@ ROLLOUT_ARGS=(
 
 EVAL_ARGS=(
    --eval-interval 20
-   --eval-prompt-data aime /root/aime-2024/aime-2024.jsonl
+   --eval-prompt-data aime /home/slime-proj/dataset/aime-2024/aime-2024.jsonl
    --n-samples-per-eval-prompt 16
    --eval-max-response-len 16384
    --eval-top-p 0.7
@@ -111,7 +120,10 @@ WANDB_ARGS=(
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 8
    --sglang-mem-fraction-static 0.7
-   --sglang-cuda-graph-bs 1 2 4 8 $(seq 16 8 256)
+   # --sglang-cuda-graph-bs 1 2 4 8 $(seq 16 8 256)
+   --sglang-disable-cuda-graph
+   --sglang-device npu
+   --sglang-attention-backend ascend
 )
 
 MISC_ARGS=(
@@ -127,18 +139,23 @@ MISC_ARGS=(
 
 # launch the master node of ray in container
 export MASTER_ADDR=${MASTER_ADDR:-"127.0.0.1"}
-ray start --head --node-ip-address ${MASTER_ADDR} --num-gpus 8 --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8265
+ray start --head --node-ip-address ${MASTER_ADDR} --disable-usage-stats --dashboard-host=0.0.0.0 --dashboard-port=8211
 
 # Build the runtime environment JSON with proper variable substitution
 RUNTIME_ENV_JSON="{
   \"env_vars\": {
-    \"PYTHONPATH\": \"/root/Megatron-LM/\",
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
-    \"NCCL_NVLS_ENABLE\": \"${HAS_NVLINK}\"
+    \"RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES\": \"1\",
+    \"ASCEND_TOOLKIT_HOME\": \"/home/b060/ascend-toolkit/latest/\",
+    \"ASCEND_OPP_PATH\": \"/home/b060/ascend-toolkit/latest/opp/\",
+    \"ASCEND_AICPU_PATH\": \"/home/b060/ascend-toolkit/latest/\",
+    \"ASCEND_HOME_PATH\": \"/home/b060/ascend-toolkit/latest/\",
+    \"set_env_path\": \"/home/b060/nnal/atb/set_env.sh\",
+    \"HYDRA_FULL_ERROR\": \"1\"
   }
 }"
 
-ray job submit --address="http://127.0.0.1:8265" \
+ray job submit --address="http://127.0.0.1:8211" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
    -- python3 train.py \
    --actor-num-nodes 1 \
