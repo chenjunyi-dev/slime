@@ -26,6 +26,7 @@ from slime.utils.misc import load_function
 from slime.utils.ray_utils import Box
 from slime.utils.tracking_utils import init_tracking
 from slime.utils.types import Sample
+from slime.utils.common import is_npu
 
 from ..utils.metric_utils import has_repetition
 from .utils import NOSET_VISIBLE_DEVICES_ENV_VARS_LIST, Lock
@@ -68,7 +69,8 @@ class RolloutManager:
             self.all_rollout_engines = [None] * num_engines
         self.num_new_engines = init_rollout_engines(args, pg, self.all_rollout_engines)
         self.nodes_per_engine = max(1, args.rollout_num_gpus_per_engine // args.num_gpus_per_node)
-        self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0).remote()
+        device_name = "NPU" if is_npu() else "GPU"
+        self.rollout_engine_lock = Lock.options(num_cpus=1, num_gpus=0, resources={device_name:0}).remote()
 
         self._metric_checker = MetricChecker.maybe_create(args)
         if self.args.use_fault_tolerance:
@@ -282,6 +284,7 @@ def init_rollout_engines(args, pg, all_rollout_engines):
     RolloutRayActor = ray.remote(SGLangEngine)
 
     rollout_engines = []
+    device_name = "NPU" if is_npu() else "GPU"
     for i in range(num_engines):
         if all_rollout_engines[i] is not None:
             continue
@@ -326,11 +329,11 @@ def init_rollout_engines(args, pg, all_rollout_engines):
 
         rollout_engine = RolloutRayActor.options(
             num_cpus=num_cpus,
-            num_gpus=num_gpus,
             scheduling_strategy=scheduling_strategy,
             runtime_env={
                 "env_vars": env_vars,
             },
+            resources={device_name:num_gpus}
         ).remote(args, rank=i)
 
         rollout_engines.append((i, rollout_engine))
