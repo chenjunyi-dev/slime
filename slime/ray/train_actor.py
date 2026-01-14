@@ -62,7 +62,10 @@ class TrainRayActor(RayActor):
         torch.serialization.add_safe_globals([slime.utils.eval_config.EvalDatasetConfig])
 
         local_rank = int(os.environ.get("LOCAL_RANK", 0))
-        if is_npu():
+
+        # TODO: Fix the NPU rank allocation bug.
+        # This is a temporary workaround to avoid incorrect local_rank assignment and should be removed once fixed.
+        if is_npu() and not args.colocate:
             if local_rank == 1:
                 local_rank = 9
             if local_rank == 0:
